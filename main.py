@@ -183,8 +183,8 @@ if "db_uploaded" not in st.session_state:
     st.session_state.db_uploaded = False
 
 # --- LOGIN SMALL BOX, Centered ---
-ADMIN_USERS = {'admin1': 'pass1', 'danish': '1245', 'avinash': '1246'}
-VIEWERS = {'user1': '1234', 'guest': 'guest'}
+ADMIN_USERS = {'admin1': 'pass@1', 'danish': 'dk@1245@', 'avinash': 'avinash_1246#'}
+VIEWERS = {'user1': '@4321#', 'guest': '@guest'}
 
 set_bg_all()  # Always apply background
 
