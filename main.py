@@ -181,6 +181,8 @@ if "search_sheet" not in st.session_state:
     st.session_state.search_sheet = all_subsections[0]
 if "db_uploaded" not in st.session_state:
     st.session_state.db_uploaded = False
+if "io_selected_sheet" not in st.session_state:
+    st.session_state.io_selected_sheet = None
 
 # --- LOGIN SMALL BOX, Centered ---
 ADMIN_USERS = {'admin1': 'pass@1', 'danish': 'dk@1245@', 'avinash': 'avinash_1246#'}
@@ -298,40 +300,168 @@ elif st.session_state.main_view == SHEET_VIEW:
     sheet = st.session_state.selected_sheet
     st.markdown(f"#### {sheet}")
     st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
-    df = clean_df(load_sheet_from_db(sheet))
-    area_col = None
-    for col in df.columns:
-        if col.strip().lower() == "area":
-            area_col = col
-            break
-    if area_col:
-        df[area_col] = df[area_col].astype(str).str.strip()
-        areas = sorted(df[area_col].replace(['', ' ', 'nan', 'NaN', 'None', 'NONE'], pd.NA).dropna().unique())
-        st.markdown("##### Select Area:")
-        areacols = st.columns(4)
-        for idx, area in enumerate(areas):
-            with areacols[idx % 4]:
-                if st.button(area, key=f"area_{area}", use_container_width=True):
-                    st.session_state.selected_area = area
+
+    # --- Special hierarchical flow for IO LIST ---
+    if sheet == "IO LIST":
+        # Build IO map from worksheet titles following IO_AREA_SHEETNAME convention
+        try:
+            sh = gsheet_helper.client.open(gsheet_helper.SHEET_NAME)
+            io_titles = [ws.title for ws in sh.worksheets() if ws.title.upper().startswith("IO_")]
+        except Exception as e:
+            st.error(f"Could not list IO worksheets: {e}")
+            io_titles = []
+
+        io_map = {}
+        for t in sorted(io_titles):
+            name = t[3:]  # remove 'IO_'
+            parts = name.split("_", 1)
+            area = parts[0] if parts else name
+            sub = parts[1] if len(parts) > 1 else "(Sheet)"
+            io_map.setdefault(area, []).append((sub, t))
+
+        # 1) Pick Area
+        if st.session_state.selected_area is None:
+            if not io_map:
+                st.warning("No IO_* worksheets found in database. Add worksheets like IO_AREA_SHEETNAME.")
+            else:
+                st.markdown("##### Select Area:")
+                areacols = st.columns(4)
+                for idx, area in enumerate(sorted(io_map.keys())):
+                    with areacols[idx % 4]:
+                        if st.button(area, key=f"io_area_{area}", use_container_width=True):
+                            st.session_state.selected_area = area
+                            st.session_state.io_selected_sheet = None
+                            st.rerun()
+            if st.button("⬅️ Back to Dashboard"):
+                st.session_state.main_view = DASHBOARD_VIEW
+                st.session_state.selected_sheet = None
+                st.session_state.selected_area = None
+                st.session_state.io_selected_sheet = None
+                st.rerun()
+
+        # 2) Pick Sheet within Area
+        elif st.session_state.io_selected_sheet is None:
+            st.markdown(f"##### {st.session_state.selected_area} — Select Sheet:")
+            sheets = io_map.get(st.session_state.selected_area, [])
+            if not sheets:
+                st.info("No sheets found for this area.")
+            cols = st.columns(3)
+            for i, (label, title) in enumerate(sheets):
+                with cols[i % 3]:
+                    if st.button(label, key=f"io_sheet_{title}", use_container_width=True):
+                        st.session_state.io_selected_sheet = title
+                        st.rerun()
+            c1, c2 = st.columns([1,1])
+            with c1:
+                if st.button("⬅️ Back to Areas", key="io_back_areas"):
+                    st.session_state.selected_area = None
+                    st.session_state.io_selected_sheet = None
+                    st.rerun()
+            with c2:
+                if st.button("⬅️ Back to Dashboard", key="io_back_dash_from_sheets"):
+                    st.session_state.main_view = DASHBOARD_VIEW
+                    st.session_state.selected_sheet = None
+                    st.session_state.selected_area = None
+                    st.session_state.io_selected_sheet = None
+                    st.rerun()
+
+        # 3) Show full sheet data with edit & export
+        else:
+            data_sheet_name = st.session_state.io_selected_sheet
+            df = clean_df(load_sheet_from_db(data_sheet_name))
+            search = st.text_input("🔎 Search in this Sheet...", key="search_in_io_sheet")
+            if search:
+                filtered_df2 = df[df.apply(lambda row: row.astype(str).str.contains(search, case=False, na=False).any(), axis=1)]
+            else:
+                filtered_df2 = df
+            filtered_df2 = filtered_df2.astype(str).replace(['nan', 'NaN', 'None', 'NONE'], '')
+
+            st.dataframe(filtered_df2, use_container_width=True, height=480)
+            st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+            if len(filtered_df2) > 0:
+                row_indices = filtered_df2.index.tolist()
+                row_options = [f"Row {i+1}" for i in range(len(row_indices))]
+                selected_row = st.selectbox("Select Row to Edit", options=row_options, key="edit_row_select_io")
+                edit_idx = row_indices[row_options.index(selected_row)]
+                edit_cols = {}
+                with st.expander("Edit Selected Row", expanded=False):
+                    st.markdown("<span style='color:#299bff;font-weight:bold;font-size:1.18rem;'>Edit Selected Row</span>", unsafe_allow_html=True)
+                    for col in filtered_df2.columns:
+                        edit_cols[col] = st.text_input(f"{col}", filtered_df2.at[edit_idx, col], key=f"edit_col_io_{col}")
+                    if st.button("Update Row", key="update_row_btn_io"):
+                        for col in filtered_df2.columns:
+                            filtered_df2.at[edit_idx, col] = edit_cols[col]
+                        master_df = clean_df(load_sheet_from_db(data_sheet_name))
+                        master_df.update(filtered_df2)
+                        save_sheet_to_db(data_sheet_name, master_df)
+                        st.success("Row updated and saved to database.")
+                        st.rerun()
+            else:
+                st.info("No rows to edit.")
+
+            st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
+            st.markdown("""
+            <div class="action-btn-container">
+            """, unsafe_allow_html=True)
+            excel_buffer = io.BytesIO()
+            filtered_df2.to_excel(excel_buffer, index=False)
+            c1, c2, c3 = st.columns([1,1,1])
+            with c1:
+                st.download_button(
+                    label="⬇️ Export Excel",
+                    data=excel_buffer.getvalue(),
+                    file_name=f"{data_sheet_name}_export.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="export_btn_io_sheet"
+                )
+            with c2:
+                if st.button("⬅️ Back to Sheets", key="io_back_sheets"):
+                    st.session_state.io_selected_sheet = None
+                    st.rerun()
+            with c3:
+                if st.button("⬅️ Back to Areas", key="io_back_areas_from_data"):
+                    st.session_state.io_selected_sheet = None
+                    st.session_state.selected_area = None
+                    st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    # --- Default behavior for all other sheets (unchanged) ---
+    else:
+        df = clean_df(load_sheet_from_db(sheet))
+        area_col = None
+        for col in df.columns:
+            if col.strip().lower() == "area":
+                area_col = col
+                break
+        if area_col:
+            df[area_col] = df[area_col].astype(str).str.strip()
+            areas = sorted(df[area_col].replace(['', ' ', 'nan', 'NaN', 'None', 'NONE'], pd.NA).dropna().unique())
+            st.markdown("##### Select Area:")
+            areacols = st.columns(4)
+            for idx, area in enumerate(areas):
+                with areacols[idx % 4]:
+                    if st.button(area, key=f"area_{area}", use_container_width=True):
+                        st.session_state.selected_area = area
+                        st.session_state.main_view = AREA_VIEW
+            if not areas:
+                st.warning("No Area values found. Showing all data.")
+                if st.button("Show All Data", use_container_width=True):
+                    st.session_state.selected_area = "All"
                     st.session_state.main_view = AREA_VIEW
-        if not areas:
-            st.warning("No Area values found. Showing all data.")
-            if st.button("Show All Data", use_container_width=True):
+            if st.button("⬅️ Back to Dashboard"):
+                st.session_state.main_view = DASHBOARD_VIEW
+                st.session_state.selected_sheet = None
+                st.session_state.selected_area = None
+        else:
+            st.warning("No 'Area' column found. Showing all data.")
+            if st.button("Show Data Table", use_container_width=True):
                 st.session_state.selected_area = "All"
                 st.session_state.main_view = AREA_VIEW
-        if st.button("⬅️ Back to Dashboard"):
-            st.session_state.main_view = DASHBOARD_VIEW
-            st.session_state.selected_sheet = None
-            st.session_state.selected_area = None
-    else:
-        st.warning("No 'Area' column found. Showing all data.")
-        if st.button("Show Data Table", use_container_width=True):
-            st.session_state.selected_area = "All"
-            st.session_state.main_view = AREA_VIEW
-        if st.button("⬅️ Back to Dashboard"):
-            st.session_state.main_view = DASHBOARD_VIEW
-            st.session_state.selected_sheet = None
-            st.session_state.selected_area = None
+            if st.button("⬅️ Back to Dashboard"):
+                st.session_state.main_view = DASHBOARD_VIEW
+                st.session_state.selected_sheet = None
+                st.session_state.selected_area = None
 
 # =========== AREA DATA TABLE VIEW (WITH ROW EDIT) ===========
 elif st.session_state.main_view == AREA_VIEW:
