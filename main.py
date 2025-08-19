@@ -221,6 +221,7 @@ if st.session_state.login is None:
 
 login_name = st.session_state.login["user"]
 login_role = st.session_state.login["role"]
+IS_ADMIN = (login_role == "admin")  # <-- viewers are read-only
 st.sidebar.markdown(f"**👤 Logged in as:** `{login_name}` ({login_role.capitalize()})")
 
 # --- DB Upload/Init
@@ -379,24 +380,28 @@ elif st.session_state.main_view == SHEET_VIEW:
             st.dataframe(filtered_df2, use_container_width=True, height=480)
             st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
+            # ---- Editing (admin only)
             if len(filtered_df2) > 0:
-                row_indices = filtered_df2.index.tolist()
-                row_options = [f"Row {i+1}" for i in range(len(row_indices))]
-                selected_row = st.selectbox("Select Row to Edit", options=row_options, key="edit_row_select_io")
-                edit_idx = row_indices[row_options.index(selected_row)]
-                edit_cols = {}
-                with st.expander("Edit Selected Row", expanded=False):
-                    st.markdown("<span style='color:#299bff;font-weight:bold;font-size:1.18rem;'>Edit Selected Row</span>", unsafe_allow_html=True)
-                    for col in filtered_df2.columns:
-                        edit_cols[col] = st.text_input(f"{col}", filtered_df2.at[edit_idx, col], key=f"edit_col_io_{col}")
-                    if st.button("Update Row", key="update_row_btn_io"):
+                if IS_ADMIN:
+                    row_indices = filtered_df2.index.tolist()
+                    row_options = [f"Row {i+1}" for i in range(len(row_indices))]
+                    selected_row = st.selectbox("Select Row to Edit", options=row_options, key="edit_row_select_io")
+                    edit_idx = row_indices[row_options.index(selected_row)]
+                    edit_cols = {}
+                    with st.expander("Edit Selected Row", expanded=False):
+                        st.markdown("<span style='color:#299bff;font-weight:bold;font-size:1.18rem;'>Edit Selected Row</span>", unsafe_allow_html=True)
                         for col in filtered_df2.columns:
-                            filtered_df2.at[edit_idx, col] = edit_cols[col]
-                        master_df = clean_df(load_sheet_from_db(data_sheet_name))
-                        master_df.update(filtered_df2)
-                        save_sheet_to_db(data_sheet_name, master_df)
-                        st.success("Row updated and saved to database.")
-                        st.rerun()
+                            edit_cols[col] = st.text_input(f"{col}", filtered_df2.at[edit_idx, col], key=f"edit_col_io_{col}")
+                        if st.button("Update Row", key="update_row_btn_io"):
+                            for col in filtered_df2.columns:
+                                filtered_df2.at[edit_idx, col] = edit_cols[col]
+                            master_df = clean_df(load_sheet_from_db(data_sheet_name))
+                            master_df.update(filtered_df2)
+                            save_sheet_to_db(data_sheet_name, master_df)
+                            st.success("Row updated and saved to database.")
+                            st.rerun()
+                else:
+                    st.info("🔒 Viewer mode: you can view and export this sheet. Editing is restricted to admins.")
             else:
                 st.info("No rows to edit.")
 
@@ -491,24 +496,28 @@ elif st.session_state.main_view == AREA_VIEW:
     st.dataframe(filtered_df2, use_container_width=True, height=420)
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
+    # ---- Editing (admin only)
     if len(filtered_df2) > 0:
-        row_indices = filtered_df2.index.tolist()
-        row_options = [f"Row {i+1}" for i in range(len(row_indices))]
-        selected_row = st.selectbox("Select Row to Edit", options=row_options, key="edit_row_select")
-        edit_idx = row_indices[row_options.index(selected_row)]
-        edit_cols = {}
-        with st.expander("Edit Selected Row", expanded=False):
-            st.markdown("<span style='color:#299bff;font-weight:bold;font-size:1.18rem;'>Edit Selected Row</span>", unsafe_allow_html=True)
-            for col in filtered_df2.columns:
-                edit_cols[col] = st.text_input(f"{col}", filtered_df2.at[edit_idx, col], key=f"edit_col_{col}")
-            if st.button("Update Row", key="update_row_btn"):
+        if IS_ADMIN:
+            row_indices = filtered_df2.index.tolist()
+            row_options = [f"Row {i+1}" for i in range(len(row_indices))]
+            selected_row = st.selectbox("Select Row to Edit", options=row_options, key="edit_row_select")
+            edit_idx = row_indices[row_options.index(selected_row)]
+            edit_cols = {}
+            with st.expander("Edit Selected Row", expanded=False):
+                st.markdown("<span style='color:#299bff;font-weight:bold;font-size:1.18rem;'>Edit Selected Row</span>", unsafe_allow_html=True)
                 for col in filtered_df2.columns:
-                    filtered_df2.at[edit_idx, col] = edit_cols[col]
-                master_df = clean_df(load_sheet_from_db(sheet))
-                master_df.update(filtered_df2)
-                save_sheet_to_db(sheet, master_df)
-                st.success("Row updated and saved to database.")
-                st.rerun()
+                    edit_cols[col] = st.text_input(f"{col}", filtered_df2.at[edit_idx, col], key=f"edit_col_{col}")
+                if st.button("Update Row", key="update_row_btn"):
+                    for col in filtered_df2.columns:
+                        filtered_df2.at[edit_idx, col] = edit_cols[col]
+                    master_df = clean_df(load_sheet_from_db(sheet))
+                    master_df.update(filtered_df2)
+                    save_sheet_to_db(sheet, master_df)
+                    st.success("Row updated and saved to database.")
+                    st.rerun()
+        else:
+            st.info("🔒 Viewer mode: you can view and export. Editing is restricted to admins.")
     else:
         st.info("No rows to edit.")
 
