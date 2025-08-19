@@ -376,7 +376,17 @@ elif st.session_state.main_view == SHEET_VIEW:
                 filtered_df2 = df
             filtered_df2 = filtered_df2.astype(str).replace(['nan', 'NaN', 'None', 'NONE'], '')
 
-            st.dataframe(filtered_df2, use_container_width=True, height=480)
+            # display-only copy with unique headers so Streamlit doesn't crash
+            display_df = filtered_df2.copy()
+            _raw = [str(c).strip() if str(c).strip() != "" else "Column" for c in display_df.columns]
+            _seen, _safe = {}, []
+            for c in _raw:
+                n = _seen.get(c, 0)
+                _safe.append(c if n == 0 else f"{c}.{n+1}")
+                _seen[c] = n + 1
+            display_df.columns = _safe
+
+            st.dataframe(display_df, use_container_width=True, height=480)
             st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
             if len(filtered_df2) > 0:
@@ -387,13 +397,21 @@ elif st.session_state.main_view == SHEET_VIEW:
                 edit_cols = {}
                 with st.expander("Edit Selected Row", expanded=False):
                     st.markdown("<span style='color:#299bff;font-weight:bold;font-size:1.18rem;'>Edit Selected Row</span>", unsafe_allow_html=True)
-                    for col in filtered_df2.columns:
-                        edit_cols[col] = st.text_input(f"{col}", filtered_df2.at[edit_idx, col], key=f"edit_col_io_{col}")
+                    # build inputs with unique labels/keys using display_df; save back by POSITION
+                    edit_vals = {}
+                    for i in range(len(display_df.columns)):
+                        edit_vals[i] = st.text_input(
+                            f"{display_df.columns[i]}",
+                            filtered_df2.iat[edit_idx, i],
+                            key=f"edit_col_io_{i}"
+                        )
                     if st.button("Update Row", key="update_row_btn_io"):
-                        for col in filtered_df2.columns:
-                            filtered_df2.at[edit_idx, col] = edit_cols[col]
+                        # write edits back into the original df by column position
+                        for i, val in edit_vals.items():
+                            filtered_df2.iat[edit_idx, i] = val
                         master_df = clean_df(load_sheet_from_db(data_sheet_name))
-                        master_df.update(filtered_df2)
+                        ncols = min(master_df.shape[1], filtered_df2.shape[1])
+                        master_df.iloc[edit_idx, :ncols] = filtered_df2.iloc[edit_idx, :ncols].values
                         save_sheet_to_db(data_sheet_name, master_df)
                         st.success("Row updated and saved to database.")
                         st.rerun()
@@ -488,7 +506,17 @@ elif st.session_state.main_view == AREA_VIEW:
         filtered_df2 = filtered_df
     filtered_df2 = filtered_df2.astype(str).replace(['nan', 'NaN', 'None', 'NONE'], '')
 
-    st.dataframe(filtered_df2, use_container_width=True, height=420)
+    # display-only copy with unique headers so Streamlit doesn't crash
+    display_df = filtered_df2.copy()
+    _raw = [str(c).strip() if str(c).strip() != "" else "Column" for c in display_df.columns]
+    _seen, _safe = {}, []
+    for c in _raw:
+        n = _seen.get(c, 0)
+        _safe.append(c if n == 0 else f"{c}.{n+1}")
+        _seen[c] = n + 1
+    display_df.columns = _safe
+
+    st.dataframe(display_df, use_container_width=True, height=420)
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
 
     if len(filtered_df2) > 0:
@@ -499,13 +527,20 @@ elif st.session_state.main_view == AREA_VIEW:
         edit_cols = {}
         with st.expander("Edit Selected Row", expanded=False):
             st.markdown("<span style='color:#299bff;font-weight:bold;font-size:1.18rem;'>Edit Selected Row</span>", unsafe_allow_html=True)
-            for col in filtered_df2.columns:
-                edit_cols[col] = st.text_input(f"{col}", filtered_df2.at[edit_idx, col], key=f"edit_col_{col}")
+            # build inputs with unique labels/keys using display_df; save back by POSITION
+            edit_vals = {}
+            for i in range(len(display_df.columns)):
+                edit_vals[i] = st.text_input(
+                    f"{display_df.columns[i]}",
+                    filtered_df2.iat[edit_idx, i],
+                    key=f"edit_col_{i}"
+                )
             if st.button("Update Row", key="update_row_btn"):
-                for col in filtered_df2.columns:
-                    filtered_df2.at[edit_idx, col] = edit_cols[col]
+                for i, val in edit_vals.items():
+                    filtered_df2.iat[edit_idx, i] = val
                 master_df = clean_df(load_sheet_from_db(sheet))
-                master_df.update(filtered_df2)
+                ncols = min(master_df.shape[1], filtered_df2.shape[1])
+                master_df.iloc[edit_idx, :ncols] = filtered_df2.iloc[edit_idx, :ncols].values
                 save_sheet_to_db(sheet, master_df)
                 st.success("Row updated and saved to database.")
                 st.rerun()
@@ -563,7 +598,17 @@ elif st.session_state.main_view == SEARCH_VIEW:
         filtered_df = df
     filtered_df = filtered_df.astype(str).replace(['nan', 'NaN', 'None', 'NONE'], '')
     st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
-    st.dataframe(filtered_df, use_container_width=True, height=650)
+    # display-only copy with unique headers so Streamlit doesn't crash
+    display_df = filtered_df.copy()
+    _raw = [str(c).strip() if str(c).strip() != "" else "Column" for c in display_df.columns]
+    _seen, _safe = {}, []
+    for c in _raw:
+        n = _seen.get(c, 0)
+        _safe.append(c if n == 0 else f"{c}.{n+1}")
+        _seen[c] = n + 1
+    display_df.columns = _safe
+
+    st.dataframe(display_df, use_container_width=True, height=650)
     st.markdown("<div style='height:22px'></div>", unsafe_allow_html=True)
     st.markdown(
         """
@@ -572,7 +617,7 @@ elif st.session_state.main_view == SEARCH_VIEW:
         unsafe_allow_html=True
     )
     excel_buffer = io.BytesIO()
-    filtered_df.to_excel(excel_buffer, index=False)
+    display_df.to_excel(excel_buffer, index=False)
     c1, c2 = st.columns([1,1])
     with c1:
         st.download_button(
