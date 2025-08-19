@@ -186,7 +186,7 @@ if "io_selected_sheet" not in st.session_state:
 
 # --- LOGIN SMALL BOX, Centered ---
 ADMIN_USERS = {'admin1': 'pass@1', 'danish': 'dk@1245@', 'avinash': 'avinash_1246#'}
-VIEWERS = {'user1': '@4321#', 'guest': '@guest'}
+VIEWERS = {'viewer': '@1234', 'guest': '@guest'}
 
 set_bg_all()  # Always apply background
 
