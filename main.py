@@ -154,7 +154,7 @@ def show_logo_and_title():
         f"""
         <div class="logo-title-box">
             <img src="data:image/png;base64,{encoded}">
-            <div class="main-title">Central Automation Department</div>
+            <div class="main-title">CHANDRAGUPTA</div>
         </div>
         """, unsafe_allow_html=True
     )
