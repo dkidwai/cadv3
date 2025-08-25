@@ -172,11 +172,10 @@ def render_mopr():
     st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
     st.markdown("### MOPR — Star Topology")
 
-    # Load WITHOUT aggressive cleaning (keep empty columns so PPT_URL isn't dropped)
+    # Load + clean
     try:
         df = load_sheet_from_db("MOPR")
-        # only drop unnamed helper columns; DO NOT drop all-blank columns
-        df = df.loc[:, [c for c in df.columns if not str(c).lower().startswith("unnamed")]]
+        df = clean_df(df)
     except Exception as e:
         st.error(f"Could not load MOPR sheet: {e}")
         if st.button("⬅️ Back to Dashboard", key="mopr_back_err"):
@@ -189,7 +188,7 @@ def render_mopr():
             st.session_state.main_view = "dashboard"
         return
 
-    # --- Forgiving header detection (handles Dept/Link/URL etc.) ---
+    # --- Forgiving header detection ---
     def _norm(name: str) -> str:
         s = str(name).replace("\u00a0", " ")
         s = s.strip().lower()
@@ -209,11 +208,9 @@ def render_mopr():
             st.session_state.main_view = "dashboard"
         return
 
-    # Build working df; keep URL even if blank
-    keep_cols = [dept_col, url_col] + ([date_col] if date_col else [])
-    df_work = df[keep_cols].copy()
+    df_work = df[[dept_col, url_col] + ([date_col] if date_col else [])].copy()
 
-    # Choose latest per department (by Date if present)
+    # Pick latest per department
     if date_col:
         df_work["__date"] = pd.to_datetime(df_work[date_col], errors="coerce")
         df_work = (
@@ -225,7 +222,7 @@ def render_mopr():
     else:
         df_work = df_work.dropna(subset=[dept_col]).drop_duplicates(subset=[dept_col], keep="last")
 
-    # Build item list
+    # Build item list; sort for stable layout
     rows = []
     for _, r in df_work.iterrows():
         d = str(r.get(dept_col, "")).strip()
@@ -240,7 +237,7 @@ def render_mopr():
             st.session_state.main_view = "dashboard"
         return
 
-    # -------- Multi-ring hub layout (scales to ~55 departments) --------
+    # -------- Multi-ring hub layout --------
     n = len(rows)
     if n <= 12:
         size = 860;  btn_w, btn_h = 140, 44; radii_f = [0.38]
@@ -280,7 +277,7 @@ def render_mopr():
         if count <= 0:
             continue
         radius = radii[r_idx]
-        angle_offset = (math.pi / max(count, 1)) * (r_idx % 2)  # stagger rings
+        angle_offset = (math.pi / max(count, 1)) * (r_idx % 2)
 
         for j in range(count):
             if idx >= n:
@@ -290,18 +287,24 @@ def render_mopr():
             angle = angle_offset + 2 * math.pi * j / max(count, 1)
             x = center + int(radius * math.cos(angle)) - btn_w // 2
             y = center + int(radius * math.sin(angle)) - btn_h // 2
+
+            # keep pill inside the box
             x = max(6, min(size - btn_w - 6, x))
             y = max(6, min(size - btn_h - 6, y))
+
             cx = x + btn_w / 2
             cy = y + btn_h / 2
 
             if url:
                 lines.append(
-                    f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" stroke="url(#grad)" stroke-width="2.5" stroke-linecap="round" opacity="0.9" />'
+                    f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" '
+                    f'stroke="url(#grad)" stroke-width="2.5" stroke-linecap="round" opacity="0.9" />'
                 )
             else:
                 lines.append(
-                    f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" stroke="#b9d7ff" stroke-width="2" stroke-linecap="round" stroke-dasharray="6 6" opacity="0.45" />'
+                    f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" '
+                    f'stroke="#b9d7ff" stroke-width="2" stroke-linecap="round" '
+                    f'stroke-dasharray="6 6" opacity="0.45" />'
                 )
 
             label_html = html.escape(dept)
@@ -316,14 +319,16 @@ def render_mopr():
             if url:
                 safe_url = url.replace('"', '%22')
                 pill = dedent(
-                    f'''<a href="{safe_url}" target="_blank" rel="noopener" title="{label_html}"
+                    f'''<a href="{safe_url}" target="_blank" rel="noopener" draggable="false"
 style="{common_css} background:linear-gradient(90deg,#299bff 10%, #55e386 90%); color:#000; text-decoration:none;">{label_html}</a>'''
                 )
             else:
+                # NOTE: pointer-events:none prevents hover/inspection bubbles
                 pill = dedent(
-                    f'''<div aria-disabled="true" title="{label_html}"
-style="{common_css} background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%); color:#2056b5; opacity:0.65; cursor:not-allowed; user-select:none;">{label_html}</div>'''
+                    f'''<div aria-disabled="true"
+style="{common_css} background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%); color:#2056b5; opacity:0.65; cursor:not-allowed; user-select:none; pointer-events:none;">{label_html}</div>'''
                 )
+
             nodes_html.append(pill)
 
     # SVG connectors behind pills
@@ -340,10 +345,11 @@ style="{common_css} background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%); 
     </svg>
     """)
 
-    # Outer container + centered hub
+    # Outer container + centered hub (selection disabled)
     html_block = dedent(f"""
     <div style="position:relative; width:{size}px; height:{size}px; margin:10px auto 20px auto;
-            background:#ffffff; border-radius:16px; box-shadow:0 8px 32px #00000011;">
+            background:#ffffff; border-radius:16px; box-shadow:0 8px 32px #00000011;
+            user-select:none; -webkit-user-select:none;">
       <div style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
               padding:12px 20px; border-radius:18px; background:#f4e7da; color:#2056b5;
               font-weight:900; box-shadow:0 2px 12px #8fd3fe60;">
@@ -375,8 +381,6 @@ style="{common_css} background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%); 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     if st.button("⬅️ Back to Dashboard", key="mopr_back_btn"):
         st.session_state.main_view = "dashboard"
-
-
 
 
 # ---------- SHEETS & NAVIGATION STATE ----------
