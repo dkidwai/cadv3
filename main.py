@@ -243,30 +243,31 @@ def render_mopr():
         y = max(6, min(size - btn_h - 6, y))
 
         if url:  # clickable when URL present
-            pill = f"""
-            <a href="{url}" target="_blank" rel="noopener"
-                 style="
-                 position:absolute; left:{x}px; top:{y}px;
-                 padding:10px 18px; border-radius:18px;
-                 background:linear-gradient(90deg,#299bff 10%, #55e386 90%);
-                 color:#000; font-weight:900; text-decoration:none;
-                 box-shadow:0 2px 12px #8fd3fe60; white-space:nowrap;">
-                {dept}
-            </a>
+          pill = f"""
+          <a href="{url}" target="_blank" rel="noopener"
+            style="
+              position:absolute; left:{x}px; top:{y}px;
+              padding:10px 18px; border-radius:18px;
+              background:linear-gradient(90deg,#299bff 10%, #55e386 90%);
+              color:#000; font-weight:900; text-decoration:none;
+              box-shadow:0 2px 12px #8fd3fe60; white-space:nowrap;">
+            {dept}
+          </a>
         """
-        else:     # non-clickable placeholder when URL missing
-            pill = f"""
-            <span title="Add PPT_URL for {dept} in the MOPR sheet"
-                 style="
-                 position:absolute; left:{x}px; top:{y}px;
-                 padding:10px 18px; border-radius:18px;
-                 background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%);
-                 color:#2056b5; font-weight:900; text-decoration:none;
-                 box-shadow:0 2px 12px #8fd3fe60; white-space:nowrap;
-                 opacity:0.85; cursor:default;">
-                {dept}
-            </span>
-        """
+        else:    # faded, non-clickable (no tooltip, no popup)
+          pill = f"""
+          <div aria-disabled="true"
+            style="
+              position:absolute; left:{x}px; top:{y}px;
+              padding:10px 18px; border-radius:18px;
+              background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%);
+              color:#2056b5; font-weight:900;
+              box-shadow:0 2px 12px #8fd3fe60; white-space:nowrap;
+              opacity:0.65; cursor:not-allowed; user-select:none;">
+            {dept}
+          </div>
+         """
+
         nodes_html.append(pill)
 
 
