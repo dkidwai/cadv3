@@ -215,10 +215,30 @@ def render_mopr():
     else:
         df_work = df_work.dropna(subset=[dept_col]).drop_duplicates(subset=[dept_col], keep="last")
 
+    # ---------- robust URL extraction (only change you needed) ----------
+    url_regex = re.compile(r'(https?://[^\s"<>]+)', re.IGNORECASE)
+    hyp_regex = re.compile(r'hyperlink\(\s*"([^"]+)"', re.IGNORECASE)
+    def extract_url(val) -> str:
+        s = str(val or "")
+        # strip NBSP and zero-width chars that make truthiness checks fail
+        s = (s.replace("\u00a0", " ")
+               .replace("\u200b", "")
+               .replace("\u200c", "")
+               .replace("\u200d", "")
+               .strip())
+        # HYPERLINK("url","text")
+        m = hyp_regex.search(s)
+        if m:
+            return m.group(1).strip()
+        # first http(s) occurrence
+        m = url_regex.search(s)
+        return m.group(1).strip() if m else ""
+
+    # Build items
     rows = []
     for _, r in df_work.iterrows():
         d = str(r.get(dept_col, "")).strip()
-        u = str(r.get(url_col, "")).strip()
+        u = extract_url(r.get(url_col, ""))
         if d:
             rows.append((d, u))
     rows.sort(key=lambda x: x[0].lower())
@@ -260,7 +280,6 @@ def render_mopr():
 
     nodes_html, lines = [], []
     idx = 0
-    import math
     for r_idx, count in enumerate(ring_counts):
         if count <= 0: continue
         radius = radii[r_idx]
@@ -311,9 +330,8 @@ def render_mopr():
         f'{"".join(lines)}</svg>'
     )
 
-    nodes_layer = "".join(nodes_html)  # IMPORTANT: no leading spaces
+    nodes_layer = "".join(nodes_html)
 
-    # Build with string concatenation (no Markdown indentation) and render via components.html
     html_block = (
         f'<div style="position:relative; width:{size}px; height:{size}px; margin:10px auto 20px auto;'
         'background:#ffffff; border-radius:16px; box-shadow:0 8px 32px #00000011;">'
@@ -324,10 +342,8 @@ def render_mopr():
         '</div>'
     )
 
-    # Use components HTML to avoid Markdown turning lines into <pre><code> blocks
     st.components.v1.html(html_block, height=size + 60, scrolling=False)
 
-    # Legend + back
     legend_html = """
      <div style='display:flex;gap:18px;justify-content:center;align-items:center;margin:6px 0 14px 0;flex-wrap:wrap;'>
        <span style="display:inline-flex;align-items:center;gap:8px;">
@@ -345,6 +361,7 @@ def render_mopr():
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     if st.button("⬅️ Back to Dashboard", key="mopr_back_btn"):
         st.session_state.main_view = "dashboard"
+
 
 
 # ---------- SHEETS & NAVIGATION STATE ----------
