@@ -167,15 +167,13 @@ def render_mopr():
     import math, html, re
     from textwrap import dedent
 
-    # Header
     show_logo_and_title()
     st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
     st.markdown("### MOPR — Star Topology")
 
-    # Load WITHOUT aggressive cleaning (keep empty columns so PPT_URL isn't dropped)
+    # --- load (keep empty PPT_URL column) ---
     try:
         df = load_sheet_from_db("MOPR")
-        # only drop unnamed helper columns; DO NOT drop all-blank columns
         df = df.loc[:, [c for c in df.columns if not str(c).lower().startswith("unnamed")]]
     except Exception as e:
         st.error(f"Could not load MOPR sheet: {e}")
@@ -189,16 +187,12 @@ def render_mopr():
             st.session_state.main_view = "dashboard"
         return
 
-    # --- Forgiving header detection (handles Dept/Link/URL etc.) ---
     def _norm(name: str) -> str:
-        s = str(name).replace("\u00a0", " ")
-        s = s.strip().lower()
-        s = re.sub(r"[\s\-]+", "_", s)
-        s = s.replace("__", "_")
+        s = str(name).replace("\u00a0", " ").strip().lower()
+        s = re.sub(r"[\s\-]+", "_", s).replace("__", "_")
         return s
 
     norm_map = {_norm(c): c for c in df.columns if str(c).strip() != ""}
-
     dept_col = next((norm_map[k] for k in ["department", "dept", "departments"] if k in norm_map), None)
     url_col  = next((norm_map[k] for k in ["ppt_url", "ppturl", "ppt_link", "ppt", "url", "link"] if k in norm_map), None)
     date_col = next((norm_map[k] for k in ["date", "updated", "updated_on", "last_updated", "last_update"] if k in norm_map), None)
@@ -209,23 +203,18 @@ def render_mopr():
             st.session_state.main_view = "dashboard"
         return
 
-    # Build working df; keep URL even if blank
     keep_cols = [dept_col, url_col] + ([date_col] if date_col else [])
     df_work = df[keep_cols].copy()
 
-    # Choose latest per department (by Date if present)
     if date_col:
         df_work["__date"] = pd.to_datetime(df_work[date_col], errors="coerce")
-        df_work = (
-            df_work.dropna(subset=[dept_col])
-                  .sort_values([dept_col, "__date"], na_position="first")
-                  .groupby(dept_col, as_index=False)
-                  .tail(1)
-        )
+        df_work = (df_work.dropna(subset=[dept_col])
+                         .sort_values([dept_col, "__date"], na_position="first")
+                         .groupby(dept_col, as_index=False)
+                         .tail(1))
     else:
         df_work = df_work.dropna(subset=[dept_col]).drop_duplicates(subset=[dept_col], keep="last")
 
-    # Build item list
     rows = []
     for _, r in df_work.iterrows():
         d = str(r.get(dept_col, "")).strip()
@@ -240,7 +229,7 @@ def render_mopr():
             st.session_state.main_view = "dashboard"
         return
 
-    # -------- Multi-ring hub layout (scales to ~55 departments) --------
+    # --- layout ---
     n = len(rows)
     if n <= 12:
         size = 860;  btn_w, btn_h = 140, 44; radii_f = [0.38]
@@ -250,12 +239,10 @@ def render_mopr():
         size = 980;  btn_w, btn_h = 120, 40; radii_f = [0.26, 0.43, 0.60]
     else:
         size = 1080; btn_w, btn_h = 118, 38; radii_f = [0.22, 0.36, 0.52, 0.68]
-
     center = size // 2
     radii  = [int(size * r) for r in radii_f]
     rings  = len(radii)
 
-    # Allocate items per ring by circumference weight
     weights = [r for r in radii]
     total_w = sum(weights)
     base = [max(0, int(round(n * (w / total_w)))) for w in weights]
@@ -265,26 +252,21 @@ def render_mopr():
         k = 0
         while diff != 0:
             i = order[k % rings]
-            if diff > 0:
-                base[i] += 1; diff -= 1
+            if diff > 0: base[i] += 1; diff -= 1
             else:
-                if base[i] > 0:
-                    base[i] -= 1; diff += 1
+                if base[i] > 0: base[i] -= 1; diff += 1
             k += 1
     ring_counts = base
 
-    # Place nodes + connectors
     nodes_html, lines = [], []
     idx = 0
+    import math
     for r_idx, count in enumerate(ring_counts):
-        if count <= 0:
-            continue
+        if count <= 0: continue
         radius = radii[r_idx]
-        angle_offset = (math.pi / max(count, 1)) * (r_idx % 2)  # stagger rings
-
+        angle_offset = (math.pi / max(count, 1)) * (r_idx % 2)
         for j in range(count):
-            if idx >= n:
-                break
+            if idx >= n: break
             dept, url = rows[idx]; idx += 1
 
             angle = angle_offset + 2 * math.pi * j / max(count, 1)
@@ -296,13 +278,9 @@ def render_mopr():
             cy = y + btn_h / 2
 
             if url:
-                lines.append(
-                    f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" stroke="url(#grad)" stroke-width="2.5" stroke-linecap="round" opacity="0.9" />'
-                )
+                lines.append(f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" stroke="url(#grad)" stroke-width="2.5" stroke-linecap="round" opacity="0.9" />')
             else:
-                lines.append(
-                    f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" stroke="#b9d7ff" stroke-width="2" stroke-linecap="round" stroke-dasharray="6 6" opacity="0.45" />'
-                )
+                lines.append(f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" stroke="#b9d7ff" stroke-width="2" stroke-linecap="round" stroke-dasharray="6 6" opacity="0.45" />')
 
             label_html = html.escape(dept)
             common_css = (
@@ -315,47 +293,39 @@ def render_mopr():
 
             if url:
                 safe_url = url.replace('"', '%22')
-                pill = dedent(
-                    f'''<a href="{safe_url}" target="_blank" rel="noopener" title="{label_html}"
-style="{common_css} background:linear-gradient(90deg,#299bff 10%, #55e386 90%); color:#000; text-decoration:none;">{label_html}</a>'''
+                nodes_html.append(
+                    f'<a href="{safe_url}" target="_blank" rel="noopener" title="{label_html}" '
+                    f'style="{common_css} background:linear-gradient(90deg,#299bff 10%, #55e386 90%); color:#000; text-decoration:none;">{label_html}</a>'
                 )
             else:
-                pill = dedent(
-                    f'''<div aria-disabled="true" title="{label_html}"
-style="{common_css} background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%); color:#2056b5; opacity:0.65; cursor:not-allowed; user-select:none;">{label_html}</div>'''
+                nodes_html.append(
+                    f'<div aria-disabled="true" title="{label_html}" '
+                    f'style="{common_css} background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%); color:#2056b5; opacity:0.65; cursor:not-allowed; user-select:none;">{label_html}</div>'
                 )
-            nodes_html.append(pill)
 
-    # SVG connectors behind pills
-    edges_svg = dedent(f"""
-    <svg width="{size}" height="{size}" viewBox="0 0 {size} {size}"
-         style="position:absolute; left:0; top:0; z-index:0; pointer-events:none;">
-      <defs>
-        <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">
-          <stop offset="10%" stop-color="#299bff"/>
-          <stop offset="90%" stop-color="#55e386"/>
-        </linearGradient>
-      </defs>
-      {''.join(lines)}
-    </svg>
-    """)
+    edges_svg = (
+        f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" '
+        f'style="position:absolute; left:0; top:0; z-index:0; pointer-events:none;">'
+        '<defs><linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">'
+        '<stop offset="10%" stop-color="#299bff"/><stop offset="90%" stop-color="#55e386"/></linearGradient></defs>'
+        f'{"".join(lines)}</svg>'
+    )
 
-    # Outer container + centered hub
-    html_block = dedent(f"""
-    <div style="position:relative; width:{size}px; height:{size}px; margin:10px auto 20px auto;
-            background:#ffffff; border-radius:16px; box-shadow:0 8px 32px #00000011;">
-      <div style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
-              padding:12px 20px; border-radius:18px; background:#f4e7da; color:#2056b5;
-              font-weight:900; box-shadow:0 2px 12px #8fd3fe60;">
-        MOPR
-      </div>
+    nodes_layer = "".join(nodes_html)  # IMPORTANT: no leading spaces
 
-      {edges_svg}
-      {''.join(nodes_html)}
-    </div>
-    """)
+    # Build with string concatenation (no Markdown indentation) and render via components.html
+    html_block = (
+        f'<div style="position:relative; width:{size}px; height:{size}px; margin:10px auto 20px auto;'
+        'background:#ffffff; border-radius:16px; box-shadow:0 8px 32px #00000011;">'
+        '<div style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);'
+        'padding:12px 20px; border-radius:18px; background:#f4e7da; color:#2056b5; font-weight:900;'
+        'box-shadow:0 2px 12px #8fd3fe60;">MOPR</div>'
+        f'{edges_svg}{nodes_layer}'
+        '</div>'
+    )
 
-    st.markdown(html_block, unsafe_allow_html=True)
+    # Use components HTML to avoid Markdown turning lines into <pre><code> blocks
+    st.components.v1.html(html_block, height=size + 60, scrolling=False)
 
     # Legend + back
     legend_html = """
