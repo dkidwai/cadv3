@@ -159,6 +159,111 @@ def show_logo_and_title():
         """, unsafe_allow_html=True
     )
 
+
+def render_mopr():
+    # Title/Header
+    show_logo_and_title()
+    st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
+    st.markdown("### MOPR — Star Topology")
+
+    # Load data from the 'MOPR' worksheet
+    try:
+        df = load_sheet_from_db("MOPR")
+    except Exception as e:
+        st.error(f"Could not load MOPR sheet: {e}")
+        if st.button("⬅️ Back to Dashboard", key="mopr_back_err"):
+            st.session_state.main_view = "dashboard"
+        return
+
+    if df.empty:
+        st.info("No entries found in MOPR sheet. Add rows with columns: Department, PPT_URL, Date.")
+        if st.button("⬅️ Back to Dashboard", key="mopr_back_empty"):
+            st.session_state.main_view = "dashboard"
+        return
+
+    # Normalize column names
+    df = df.rename(columns={c: c.strip() for c in df.columns})
+    lower_map = {c.lower(): c for c in df.columns}
+
+    if "department" not in lower_map or "ppt_url" not in lower_map:
+        st.error("MOPR sheet must have columns: Department, PPT_URL, (optional) Date")
+        if st.button("⬅️ Back to Dashboard", key="mopr_back_cols"):
+            st.session_state.main_view = "dashboard"
+        return
+
+    dept_col = lower_map["department"]
+    url_col  = lower_map["ppt_url"]
+    date_col = lower_map.get("date", None)
+
+    df_work = df[[dept_col, url_col] + ([date_col] if date_col else [])].copy()
+
+    # Pick latest PPT per department (by Date if present)
+    if date_col:
+        df_work["__date"] = pd.to_datetime(df_work[date_col], errors="coerce")
+        df_work = (df_work.sort_values("__date")
+                           .dropna(subset=["__date"])
+                           .groupby(dept_col, as_index=False)
+                           .tail(1))
+    else:
+        df_work = df_work.drop_duplicates(subset=[dept_col], keep="last")
+
+    # Build item list
+    rows = []
+    for _, r in df_work.iterrows():
+        d = str(r.get(dept_col, "")).strip()
+        u = str(r.get(url_col, "")).strip()
+        if d and u:
+            rows.append((d, u))
+
+    if not rows:
+        st.info("No valid Department / PPT_URL pairs found in MOPR.")
+        if st.button("⬅️ Back to Dashboard", key="mopr_back_nodata"):
+            st.session_state.main_view = "dashboard"
+        return
+
+    # Simple radial (star) layout with HTML buttons
+    import math
+    n = len(rows)
+    size = 480       # container size (px)
+    center = size // 2
+    radius = 180     # circle radius (px)
+    btn_w = 140
+    btn_h = 44
+
+    nodes_html = []
+    for i, (dept, url) in enumerate(rows):
+        angle = 2 * math.pi * i / max(n, 1)
+        x = center + int(radius * math.cos(angle)) - btn_w // 2
+        y = center + int(radius * math.sin(angle)) - btn_h // 2
+        nodes_html.append(f"""
+            <a href="{url}" target="_blank" rel="noopener"
+               style="
+                 position:absolute; left:{x}px; top:{y}px;
+                 padding:10px 18px; border-radius:18px;
+                 background:linear-gradient(90deg,#299bff 10%, #55e386 90%);
+                 color:#000; font-weight:900; text-decoration:none;
+                 box-shadow:0 2px 12px #8fd3fe60; white-space:nowrap;">
+               {dept}
+            </a>
+        """)
+
+    html = f"""
+    <div style="position:relative; width:{size}px; height:{size}px; margin:10px auto 20px auto;
+                background:#ffffff; border-radius:16px; box-shadow:0 8px 32px #00000011;">
+        <div style="position:absolute; left:{center-60}px; top:{center-24}px;
+                    padding:12px 20px; border-radius:18px; background:#f4e7da;
+                    color:#2056b5; font-weight:900; box-shadow:0 2px 12px #8fd3fe60;">
+            MOPR
+        </div>
+        {''.join(nodes_html)}
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    if st.button("⬅️ Back to Dashboard", key="mopr_back_btn"):
+        st.session_state.main_view = "dashboard"
+
 # ---------- SHEETS & NAVIGATION STATE ----------
 all_subsections = [
     "PLC DETAILS", "OS DETAILS", "SINGLE POINT TRIPPING", "PAIN POINT",
@@ -168,6 +273,8 @@ DASHBOARD_VIEW = "dashboard"
 SHEET_VIEW = "sheet"
 AREA_VIEW = "area"
 SEARCH_VIEW = "search"
+MOPR_VIEW = "mopr"
+
 
 if "login" not in st.session_state:
     st.session_state.login = None
@@ -293,6 +400,13 @@ if st.session_state.main_view == DASHBOARD_VIEW:
     if st.button("🔍 Universal Search", key="big_univ_search", use_container_width=True):
         st.session_state.main_view = SEARCH_VIEW
     st.markdown('</div>', unsafe_allow_html=True)
+    # --- MOPR launcher (separate; keeps your current structure unchanged)
+    st.markdown('<div style="height:10px;"></div>', unsafe_allow_html=True)
+    st.markdown('<div style="width:100%;max-width:340px;margin:auto;">', unsafe_allow_html=True)
+    if st.button("⭐ MOPR", key="open_mopr", use_container_width=True):
+       st.session_state.main_view = MOPR_VIEW
+    st.markdown('</div>', unsafe_allow_html=True)
+
 
 # =========== SHEET => AREAS VIEW ===========
 elif st.session_state.main_view == SHEET_VIEW:
@@ -597,6 +711,10 @@ elif st.session_state.main_view == SEARCH_VIEW:
             st.session_state.selected_sheet = None
             st.session_state.selected_area = None
     st.markdown("</div>", unsafe_allow_html=True)
+    # =========== MOPR VIEW ===========
+elif st.session_state.main_view == MOPR_VIEW:
+    render_mopr()
+
 
 # =========== SIDEBAR LOGOUT ===========
 if st.sidebar.button("Logout"):
