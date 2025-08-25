@@ -235,6 +235,10 @@ def render_mopr():
         angle = 2 * math.pi * i / max(n, 1)
         x = center + int(radius * math.cos(angle)) - btn_w // 2
         y = center + int(radius * math.sin(angle)) - btn_h // 2
+        # keep the pill fully inside the box (6px padding)
+        x = max(6, min(size - btn_w - 6, x))
+        y = max(6, min(size - btn_h - 6, y))
+
         nodes_html.append(f"""
             <a href="{url}" target="_blank" rel="noopener"
                style="
