@@ -172,10 +172,11 @@ def render_mopr():
     st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
     st.markdown("### MOPR — Star Topology")
 
-    # Load + clean
+    # Load WITHOUT aggressive cleaning (keep empty columns so PPT_URL isn't dropped)
     try:
         df = load_sheet_from_db("MOPR")
-        df = clean_df(df)
+        # only drop unnamed helper columns; DO NOT drop all-blank columns
+        df = df.loc[:, [c for c in df.columns if not str(c).lower().startswith("unnamed")]]
     except Exception as e:
         st.error(f"Could not load MOPR sheet: {e}")
         if st.button("⬅️ Back to Dashboard", key="mopr_back_err"):
@@ -188,11 +189,11 @@ def render_mopr():
             st.session_state.main_view = "dashboard"
         return
 
-    # --- Forgiving header detection ---
+    # --- Forgiving header detection (handles Dept/Link/URL etc.) ---
     def _norm(name: str) -> str:
-        s = str(name).replace("\u00a0", " ")     # remove non-breaking spaces
+        s = str(name).replace("\u00a0", " ")
         s = s.strip().lower()
-        s = re.sub(r"[\s\-]+", "_", s)           # spaces/dashes -> underscore
+        s = re.sub(r"[\s\-]+", "_", s)
         s = s.replace("__", "_")
         return s
 
@@ -208,9 +209,11 @@ def render_mopr():
             st.session_state.main_view = "dashboard"
         return
 
-    df_work = df[[dept_col, url_col] + ([date_col] if date_col else [])].copy()
+    # Build working df; keep URL even if blank
+    keep_cols = [dept_col, url_col] + ([date_col] if date_col else [])
+    df_work = df[keep_cols].copy()
 
-    # Choose latest per department (by Date if present). Keep depts even if URL is blank.
+    # Choose latest per department (by Date if present)
     if date_col:
         df_work["__date"] = pd.to_datetime(df_work[date_col], errors="coerce")
         df_work = (
@@ -222,7 +225,7 @@ def render_mopr():
     else:
         df_work = df_work.dropna(subset=[dept_col]).drop_duplicates(subset=[dept_col], keep="last")
 
-    # Build item list; sort for stable layout
+    # Build item list
     rows = []
     for _, r in df_work.iterrows():
         d = str(r.get(dept_col, "")).strip()
@@ -287,25 +290,18 @@ def render_mopr():
             angle = angle_offset + 2 * math.pi * j / max(count, 1)
             x = center + int(radius * math.cos(angle)) - btn_w // 2
             y = center + int(radius * math.sin(angle)) - btn_h // 2
-
-            # keep pill inside the box
             x = max(6, min(size - btn_w - 6, x))
             y = max(6, min(size - btn_h - 6, y))
-
-            # connector end (pill center)
             cx = x + btn_w / 2
             cy = y + btn_h / 2
 
             if url:
                 lines.append(
-                    f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" '
-                    f'stroke="url(#grad)" stroke-width="2.5" stroke-linecap="round" opacity="0.9" />'
+                    f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" stroke="url(#grad)" stroke-width="2.5" stroke-linecap="round" opacity="0.9" />'
                 )
             else:
                 lines.append(
-                    f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" '
-                    f'stroke="#b9d7ff" stroke-width="2" stroke-linecap="round" '
-                    f'stroke-dasharray="6 6" opacity="0.45" />'
+                    f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" stroke="#b9d7ff" stroke-width="2" stroke-linecap="round" stroke-dasharray="6 6" opacity="0.45" />'
                 )
 
             label_html = html.escape(dept)
@@ -379,6 +375,7 @@ style="{common_css} background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%); 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     if st.button("⬅️ Back to Dashboard", key="mopr_back_btn"):
         st.session_state.main_view = "dashboard"
+
 
 
 
