@@ -224,9 +224,9 @@ def render_mopr():
     # Simple radial (star) layout with HTML buttons
     import math
     n = len(rows)
-    size = 480       # container size (px)
+    size = 880       # container size (px)
     center = size // 2
-    radius = 180     # circle radius (px)
+    radius = int(size * 0.38)   # scales with canvas size
     btn_w = 140
     btn_h = 44
 
