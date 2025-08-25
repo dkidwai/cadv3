@@ -208,18 +208,20 @@ def render_mopr():
         df_work = df_work.drop_duplicates(subset=[dept_col], keep="last")
 
     # Build item list
+    # Build item list (show departments even if PPT_URL is empty)
     rows = []
     for _, r in df_work.iterrows():
-        d = str(r.get(dept_col, "")).strip()
-        u = str(r.get(url_col, "")).strip()
-        if d and u:
-            rows.append((d, u))
+       d = str(r.get(dept_col, "")).strip()
+       u = str(r.get(url_col, "")).strip()
+       if d:  # keep dept even if URL missing
+        rows.append((d, u))
 
     if not rows:
-        st.info("No valid Department / PPT_URL pairs found in MOPR.")
-        if st.button("⬅️ Back to Dashboard", key="mopr_back_nodata"):
-            st.session_state.main_view = "dashboard"
-        return
+       st.info("No departments found in MOPR sheet. Add at least 'Department' values.")
+       if st.button("⬅️ Back to Dashboard", key="mopr_back_nodata"):
+        st.session_state.main_view = "dashboard"
+       return
+
 
     # Simple radial (star) layout with HTML buttons
     import math
@@ -235,21 +237,38 @@ def render_mopr():
         angle = 2 * math.pi * i / max(n, 1)
         x = center + int(radius * math.cos(angle)) - btn_w // 2
         y = center + int(radius * math.sin(angle)) - btn_h // 2
+
         # keep the pill fully inside the box (6px padding)
         x = max(6, min(size - btn_w - 6, x))
         y = max(6, min(size - btn_h - 6, y))
 
-        nodes_html.append(f"""
+        if url:  # clickable when URL present
+            pill = f"""
             <a href="{url}" target="_blank" rel="noopener"
-               style="
+                 style="
                  position:absolute; left:{x}px; top:{y}px;
                  padding:10px 18px; border-radius:18px;
                  background:linear-gradient(90deg,#299bff 10%, #55e386 90%);
                  color:#000; font-weight:900; text-decoration:none;
                  box-shadow:0 2px 12px #8fd3fe60; white-space:nowrap;">
-               {dept}
+                {dept}
             </a>
-        """)
+        """
+        else:     # non-clickable placeholder when URL missing
+            pill = f"""
+            <span title="Add PPT_URL for {dept} in the MOPR sheet"
+                 style="
+                 position:absolute; left:{x}px; top:{y}px;
+                 padding:10px 18px; border-radius:18px;
+                 background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%);
+                 color:#2056b5; font-weight:900; text-decoration:none;
+                 box-shadow:0 2px 12px #8fd3fe60; white-space:nowrap;
+                 opacity:0.85; cursor:default;">
+                {dept}
+            </span>
+        """
+        nodes_html.append(pill)
+
 
     html = f"""
     <div style="position:relative; width:{size}px; height:{size}px; margin:10px auto 20px auto;
