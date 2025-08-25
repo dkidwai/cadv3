@@ -162,7 +162,7 @@ def show_logo_and_title():
 # ---------- SHEETS & NAVIGATION STATE ----------
 all_subsections = [
     "PLC DETAILS", "OS DETAILS", "SINGLE POINT TRIPPING", "PAIN POINT",
-    "IO LIST", "CRITICAL SPARES","BACKUP","PANEL EARTHING","AUDIT","INVENTORY","DIRECTORY"
+    "IO LIST", "CRITICAL SPARES","BACKUP","PANEL EARTHING","AUDIT","INVENTORY","Directory",
 ]
 DASHBOARD_VIEW = "dashboard"
 SHEET_VIEW = "sheet"
