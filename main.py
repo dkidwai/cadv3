@@ -282,6 +282,21 @@ def render_mopr():
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
+    # Legend under the star
+    legend_html = """
+     <div style='display:flex;gap:18px;justify-content:center;align-items:center;margin:6px 0 14px 0;flex-wrap:wrap;'>
+       <span style="display:inline-flex;align-items:center;gap:8px;">
+         <span style="display:inline-block;width:18px;height:12px;border-radius:6px;background:linear-gradient(90deg,#299bff 10%, #55e386 90%);box-shadow:0 1px 6px #8fd3fe60;"></span>
+         <span style="color:#2056b5;font-weight:700;">Clickable (PPT available)</span>
+     </span>
+     <span style="display:inline-flex;align-items:center;gap:8px;">
+         <span style="display:inline-block;width:18px;height:12px;border-radius:6px;background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%);box-shadow:0 1px 6px #8fd3fe60;opacity:0.85;"></span>
+         <span style="color:#2056b5;font-weight:700;">No PPT yet</span>
+     </span>
+    </div>
+    """
+    st.markdown(legend_html, unsafe_allow_html=True)
+
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     if st.button("⬅️ Back to Dashboard", key="mopr_back_btn"):
