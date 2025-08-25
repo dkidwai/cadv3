@@ -163,6 +163,9 @@ def show_logo_and_title():
 
 
 def render_mopr():
+    from textwrap import dedent
+    import math, html  # html for safe-escaping labels
+
     # Title/Header
     show_logo_and_title()
     st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
@@ -171,6 +174,7 @@ def render_mopr():
     # Load data from the 'MOPR' worksheet
     try:
         df = load_sheet_from_db("MOPR")
+        df = clean_df(df)  # ensure clean before using
     except Exception as e:
         st.error(f"Could not load MOPR sheet: {e}")
         if st.button("⬅️ Back to Dashboard", key="mopr_back_err"):
@@ -199,71 +203,158 @@ def render_mopr():
 
     df_work = df[[dept_col, url_col] + ([date_col] if date_col else [])].copy()
 
-    # Pick latest PPT per department (by Date if present)
+    # Pick latest PPT per department (by Date if present). Keep depts even if URL empty.
     if date_col:
         df_work["__date"] = pd.to_datetime(df_work[date_col], errors="coerce")
-        df_work = (df_work.sort_values("__date")
-                           .dropna(subset=["__date"])
-                           .groupby(dept_col, as_index=False)
-                           .tail(1))
+        df_work = (
+            df_work.dropna(subset=[dept_col])
+                   .sort_values([dept_col, "__date"], na_position="first")
+                   .groupby(dept_col, as_index=False)
+                   .tail(1)
+        )
     else:
-        df_work = df_work.drop_duplicates(subset=[dept_col], keep="last")
+        df_work = df_work.dropna(subset=[dept_col]).drop_duplicates(subset=[dept_col], keep="last")
 
-    # Build item list
-    # Build item list (show departments even if PPT_URL is empty)
+    # Build item list (show departments even if PPT_URL is empty). Sort for stable layout.
     rows = []
     for _, r in df_work.iterrows():
-       d = str(r.get(dept_col, "")).strip()
-       u = str(r.get(url_col, "")).strip()
-       if d:  # keep dept even if URL missing
-        rows.append((d, u))
+        d = str(r.get(dept_col, "")).strip()
+        u = str(r.get(url_col, "")).strip()
+        if d:
+            rows.append((d, u))
+    rows.sort(key=lambda x: x[0].lower())
 
     if not rows:
-       st.info("No departments found in MOPR sheet. Add at least 'Department' values.")
-       if st.button("⬅️ Back to Dashboard", key="mopr_back_nodata"):
-        st.session_state.main_view = "dashboard"
-       return
+        st.info("No departments found in MOPR sheet. Add at least 'Department' values.")
+        if st.button("⬅️ Back to Dashboard", key="mopr_back_nodata"):
+            st.session_state.main_view = "dashboard"
+        return
 
-
-    # Simple radial (star) layout with HTML buttons
-    import math
+    # ---------- Multi-ring layout that scales ----------
     n = len(rows)
-    size = 880       # container size (px)
+
+    # Adaptive canvas & button size (good up to ~55 departments)
+    if n <= 12:
+        size = 860;  btn_w, btn_h = 140, 44; radii_f = [0.38]
+    elif n <= 30:
+        size = 920;  btn_w, btn_h = 130, 42; radii_f = [0.30, 0.52]
+    elif n <= 55:
+        size = 980;  btn_w, btn_h = 120, 40; radii_f = [0.26, 0.43, 0.60]
+    else:
+        size = 1080; btn_w, btn_h = 118, 38; radii_f = [0.22, 0.36, 0.52, 0.68]
+
     center = size // 2
-    radius = int(size * 0.38)   # scales with canvas size
-    btn_w = 140
-    btn_h = 44
+    radii   = [int(size * r) for r in radii_f]
+    rings   = len(radii)
 
+    # Distribute counts across rings roughly by circumference (outer rings hold more)
+    weights = [r for r in radii]
+    total_w = sum(weights)
+    base    = [max(0, int(round(n * (w / total_w)))) for w in weights]
+    diff    = n - sum(base)
+    if diff != 0:
+        order = sorted(range(rings), key=lambda i: weights[i], reverse=(diff > 0))
+        k = 0
+        while diff != 0:
+            i = order[k % rings]
+            if diff > 0:
+                base[i] += 1; diff -= 1
+            else:
+                if base[i] > 0:
+                    base[i] -= 1; diff += 1
+            k += 1
+    ring_counts = base
+
+    # Place nodes + connectors
     nodes_html = []
-    # ... inside render_mopr(), after nodes_html = []
-    for i, (dept, url) in enumerate(rows):
-        angle = 2 * math.pi * i / max(n, 1)
-        x = center + int(radius * math.cos(angle)) - btn_w // 2
-        y = center + int(radius * math.sin(angle)) - btn_h // 2
-        x = max(6, min(size - btn_w - 6, x))
-        y = max(6, min(size - btn_h - 6, y))
+    lines      = []
+    idx = 0
+    for r_idx, count in enumerate(ring_counts):
+        if count <= 0:
+            continue
+        radius = radii[r_idx]
 
-        if url:  # clickable
-          pill = dedent(f'''<a href="{url}" target="_blank" rel="noopener"
-    style="position:absolute; left:{x}px; top:{y}px; padding:10px 18px; border-radius:18px;
-    background:linear-gradient(90deg,#299bff 10%, #55e386 90%); color:#000; font-weight:900;
-    text-decoration:none; box-shadow:0 2px 12px #8fd3fe60; white-space:nowrap;">{dept}</a>''')
-        else:    # faded, not clickable
-          pill = dedent(f'''<div aria-disabled="true"
-    style="position:absolute; left:{x}px; top:{y}px; padding:10px 18px; border-radius:18px;
-    background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%); color:#2056b5; font-weight:900;
-    box-shadow:0 2px 12px #8fd3fe60; white-space:nowrap; opacity:0.65; cursor:not-allowed; user-select:none;">{dept}</div>''')
+        # Stagger rotation per ring so pills aren't radially aligned
+        angle_offset = (math.pi / max(count, 1)) * (r_idx % 2)
 
-        nodes_html.append(pill)
+        for j in range(count):
+            if idx >= n:
+                break
+            dept, url = rows[idx]; idx += 1
 
-    html = dedent(f'''<div style="position:relative; width:{size}px; height:{size}px; margin:10px auto 20px auto;
-    background:#ffffff; border-radius:16px; box-shadow:0 8px 32px #00000011;">
-    <div style="position:absolute; left:{center-60}px; top:{center-24}px; padding:12px 20px; border-radius:18px;
-    background:#f4e7da; color:#2056b5; font-weight:900; box-shadow:0 2px 12px #8fd3fe60;">MOPR</div>
-    {''.join(nodes_html)}
-    </div>''')
+            angle = angle_offset + 2 * math.pi * j / max(count, 1)
+            x = center + int(radius * math.cos(angle)) - btn_w // 2
+            y = center + int(radius * math.sin(angle)) - btn_h // 2
 
-    st.markdown(html, unsafe_allow_html=True)
+            # keep pill inside the box (6px padding)
+            x = max(6, min(size - btn_w - 6, x))
+            y = max(6, min(size - btn_h - 6, y))
+
+            # connector end point (pill center)
+            cx = x + btn_w / 2
+            cy = y + btn_h / 2
+
+            # Connector: gradient if URL present, dashed faint otherwise
+            if url:
+                line = f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" stroke="url(#grad)" stroke-width="2.5" stroke-linecap="round" opacity="0.9" />'
+            else:
+                line = f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" stroke="#b9d7ff" stroke-width="2" stroke-linecap="round" stroke-dasharray="6 6" opacity="0.45" />'
+            lines.append(line)
+
+            # Pill styling (inline-flex + fixed box + ellipsis + safe text)
+            label_html = html.escape(dept)
+            common_css = (
+                f"position:absolute; left:{x}px; top:{y}px; border-radius:18px;"
+                f"display:inline-flex; align-items:center; justify-content:center;"
+                f"box-sizing:border-box; width:{btn_w}px; height:{btn_h}px; padding:0 18px;"
+                "overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"
+                "box-shadow:0 2px 12px #8fd3fe60; font-weight:900; z-index:1; text-align:center;"
+            )
+
+            if url:  # clickable
+                safe_url = html.escape(url, quote=True)
+                pill = dedent(
+                    f'''<a href="{safe_url}" target="_blank" rel="noopener" title="{label_html}"
+style="{common_css} background:linear-gradient(90deg,#299bff 10%, #55e386 90%); color:#000; text-decoration:none;">{label_html}</a>'''
+                )
+            else:    # faded, not clickable
+                pill = dedent(
+                    f'''<div aria-disabled="true" title="{label_html}"
+style="{common_css} background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%); color:#2056b5; opacity:0.65; cursor:not-allowed; user-select:none;">{label_html}</div>'''
+                )
+
+            nodes_html.append(pill)
+
+    # SVG connectors behind pills
+    edges_svg = dedent(f'''
+    <svg width="{size}" height="{size}" viewBox="0 0 {size} {size}"
+         style="position:absolute; left:0; top:0; z-index:0; pointer-events:none;">
+      <defs>
+        <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="10%" stop-color="#299bff"/>
+          <stop offset="90%" stop-color="#55e386"/>
+        </linearGradient>
+      </defs>
+      {''.join(lines)}
+    </svg>
+    ''')
+
+    # Outer container + center hub (perfectly centered)
+    html_block = dedent(f'''
+    <div style="position:relative; width:{size}px; height:{size}px; margin:10px auto 20px auto;
+            background:#ffffff; border-radius:16px; box-shadow:0 8px 32px #00000011;">
+      <div style="position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+              padding:12px 20px; border-radius:18px; background:#f4e7da; color:#2056b5;
+              font-weight:900; box-shadow:0 2px 12px #8fd3fe60;">
+        MOPR
+      </div>
+
+      {edges_svg}            <!-- connectors behind pills -->
+      {''.join(nodes_html)}  <!-- pills above lines -->
+    </div>
+    ''')
+
+    st.markdown(html_block, unsafe_allow_html=True)
 
     # Legend under the star
     legend_html = """
@@ -271,19 +362,20 @@ def render_mopr():
        <span style="display:inline-flex;align-items:center;gap:8px;">
          <span style="display:inline-block;width:18px;height:12px;border-radius:6px;background:linear-gradient(90deg,#299bff 10%, #55e386 90%);box-shadow:0 1px 6px #8fd3fe60;"></span>
          <span style="color:#2056b5;font-weight:700;">Clickable (PPT available)</span>
-     </span>
-     <span style="display:inline-flex;align-items:center;gap:8px;">
+       </span>
+       <span style="display:inline-flex;align-items:center;gap:8px;">
          <span style="display:inline-block;width:18px;height:12px;border-radius:6px;background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%);box-shadow:0 1px 6px #8fd3fe60;opacity:0.85;"></span>
          <span style="color:#2056b5;font-weight:700;">No PPT yet</span>
-     </span>
-    </div>
+       </span>
+     </div>
     """
     st.markdown(legend_html, unsafe_allow_html=True)
-
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     if st.button("⬅️ Back to Dashboard", key="mopr_back_btn"):
         st.session_state.main_view = "dashboard"
+
+
 
 # ---------- SHEETS & NAVIGATION STATE ----------
 all_subsections = [
