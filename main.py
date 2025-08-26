@@ -323,12 +323,19 @@ def render_mopr():
                 )
 
     edges_svg = (
-        f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" '
-        f'style="position:absolute; left:0; top:0; z-index:0; pointer-events:none;">'
-        '<defs><linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">'
-        '<stop offset="10%" stop-color="#299bff"/><stop offset="90%" stop-color="#55e386"/></linearGradient></defs>'
-        f'{"".join(lines)}</svg>'
+          f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" '
+          f'style="position:absolute; left:0; top:0; z-index:0; pointer-events:none;">'
+          f'<defs>'
+          f'  <linearGradient id="grad" gradientUnits="userSpaceOnUse" '
+          f'                  x1="0" y1="0" x2="{size}" y2="0">'
+          f'    <stop offset="10%" stop-color="#299bff"/>'
+          f'    <stop offset="90%" stop-color="#55e386"/>'
+          f'  </linearGradient>'
+          f'</defs>'
+          f'{"".join(lines)}'
+          f'</svg>'
     )
+
 
     nodes_layer = "".join(nodes_html)
 
