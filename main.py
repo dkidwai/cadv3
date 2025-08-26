@@ -5,6 +5,25 @@ import io
 import gsheet_helper
 from gsheet_helper import load_sheet_from_db, save_sheet_to_db
 from textwrap import dedent
+import re
+
+# --- Fix for Excel export: strip illegal XML/control chars ---
+_ILLEGAL_CTRL = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F]')
+
+def _sanitize_excel_str(v):
+    s = "" if v is None else str(v)
+    s = (s.replace("\u00A0", " ")  # NBSP -> space
+         .replace("\uFEFF", "")    # BOM
+         .replace("\u200B", "")    # zero-width space
+         .replace("\u200C", "")    # ZWNJ
+         .replace("\u200D", "")    # ZWJ
+         .replace("\u2060", ""))   # word joiner
+    s = _ILLEGAL_CTRL.sub("", s)   # remove ASCII control chars Excel disallows
+    return s
+
+def sanitize_df_for_excel(df: pd.DataFrame) -> pd.DataFrame:
+    return df.applymap(_sanitize_excel_str)
+
 
 
 
@@ -631,7 +650,8 @@ elif st.session_state.main_view == SHEET_VIEW:
             <div class="action-btn-container">
             """, unsafe_allow_html=True)
             excel_buffer = io.BytesIO()
-            filtered_df2.to_excel(excel_buffer, index=False)
+            sanitize_df_for_excel(filtered_df2).to_excel(excel_buffer, index=False)
+
             c1, c2, c3 = st.columns([1,1,1])
             with c1:
                 st.download_button(
@@ -750,7 +770,8 @@ elif st.session_state.main_view == AREA_VIEW:
         unsafe_allow_html=True
     )
     excel_buffer = io.BytesIO()
-    filtered_df2.to_excel(excel_buffer, index=False)
+    sanitize_df_for_excel(filtered_df2).to_excel(excel_buffer, index=False)
+
     c1, c2, c3 = st.columns([1,1,1])
     with c1:
         st.download_button(
@@ -802,7 +823,8 @@ elif st.session_state.main_view == SEARCH_VIEW:
         unsafe_allow_html=True
     )
     excel_buffer = io.BytesIO()
-    filtered_df.to_excel(excel_buffer, index=False)
+    sanitize_df_for_excel(filtered_df).to_excel(excel_buffer, index=False)
+
     c1, c2 = st.columns([1,1])
     with c1:
         st.download_button(
