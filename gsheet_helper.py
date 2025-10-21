@@ -3,26 +3,42 @@ import pandas as pd
 from google.oauth2.service_account import Credentials
 import streamlit as st
 
-# --- Read credentials from Streamlit secrets ---
-SERVICE_ACCOUNT_INFO = dict(st.secrets["service_account"])
+# --- Friendly check so the app doesn't crash if secrets.toml is missing ---
+def _load_service_account():
+    if "service_account" not in st.secrets:
+        st.error(
+            "Google credentials not found.\n\n"
+            "Add **.streamlit/secrets.toml** with a [service_account] block "
+            "(or set them in Streamlit Cloud: Settings → Secrets)."
+        )
+        raise SystemExit
+    return dict(st.secrets["service_account"])
+
+SERVICE_ACCOUNT_INFO = _load_service_account()
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
+    "https://www.googleapis.com/auth/drive",
 ]
 SHEET_NAME = "CentralAutomationDB"  # Use your Google Sheet name
 
 creds = Credentials.from_service_account_info(SERVICE_ACCOUNT_INFO, scopes=SCOPES)
 client = gspread.authorize(creds)
 
+@st.cache_resource
+def _open_spreadsheet():
+    return client.open(SHEET_NAME)
+
+
 def get_sheet(sheet_name):
     """Return the worksheet object, create it if not exists."""
-    sh = client.open(SHEET_NAME)
+    sh = _open_spreadsheet()  # use cached spreadsheet
     try:
         ws = sh.worksheet(sheet_name)
     except gspread.exceptions.WorksheetNotFound:
         ws = sh.add_worksheet(title=sheet_name, rows="1000", cols="20")
     return ws
+
 
 @st.cache_data(ttl=180)
 def load_sheet_from_db(sheet_name):
