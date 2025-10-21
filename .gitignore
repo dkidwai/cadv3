@@ -1,3 +1,5 @@
 centralautomationdashboard-cbcd913bcd93.json
 app.db
 .streamlit/secrets.toml
+__pycache__/
+*.pyc
