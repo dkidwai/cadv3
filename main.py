@@ -6,6 +6,8 @@ import gsheet_helper
 from gsheet_helper import load_sheet_from_db, save_sheet_to_db
 from textwrap import dedent
 import re
+import os
+import json
 
 # --- Fix for Excel export: strip illegal XML/control chars ---
 _ILLEGAL_CTRL = re.compile(r'[\x00-\x08\x0B\x0C\x0E-\x1F]')
@@ -418,8 +420,39 @@ if "io_selected_sheet" not in st.session_state:
     st.session_state.io_selected_sheet = None
 
 # --- LOGIN SMALL BOX, Centered ---
-ADMIN_USERS = {'admin1': 'pass@1', 'danish': 'dk@1245@', 'avinash': 'avinash_1246#'}
-VIEWERS = {'user': '@1234', 'guest': '@guest'}
+def load_credentials():
+    admins = {}
+    viewers = {}
+
+    # 1) Streamlit secrets
+    try:
+        admins = dict(st.secrets.get("admins", {}))
+        viewers = dict(st.secrets.get("viewers", {}))
+    except Exception:
+        admins = {}
+        viewers = {}
+
+    # 2) Optional env fallback
+    if not admins:
+        raw = os.getenv("CHANDRAGUPTA_ADMINS_JSON", "").strip()
+        if raw:
+            try:
+                admins = json.loads(raw)
+            except Exception:
+                admins = {}
+
+    if not viewers:
+        raw = os.getenv("CHANDRAGUPTA_VIEWERS_JSON", "").strip()
+        if raw:
+            try:
+                viewers = json.loads(raw)
+            except Exception:
+                viewers = {}
+
+    return admins, viewers
+
+
+ADMIN_USERS, VIEWERS = load_credentials()
 
 set_bg_all()  # Always apply background
 
