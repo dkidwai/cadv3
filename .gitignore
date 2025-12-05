@@ -3,3 +3,5 @@ app.db
 .streamlit/secrets.toml
 __pycache__/
 *.pyc
+.streamlit/config.toml
+.streamlit/secrets.sample.toml
