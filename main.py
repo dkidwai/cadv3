@@ -184,15 +184,25 @@ def show_logo_and_title():
 
 
 def render_mopr():
-    """Visualize the MOPR sheet as a hub-and-spoke (multi-ring) map."""
-    import math, html, re
-    from textwrap import dedent
+    """MOPR star topology with Month + FY filters.
+
+    - Preferred filtering uses a Date column.
+    - Fallback uses optional Month/FY columns if Date is missing.
+    - FY logic is India style (Apr to Mar).
+
+    Required (aliases ok):
+    - Department
+    - PPT_URL / Link / URL / PPT
+    - Date (recommended)
+    """
+
+    import math, html
 
     show_logo_and_title()
     st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
     st.markdown("### MOPR — Star Topology")
 
-    # --- load (keep empty PPT_URL column) ---
+    # --- load ---
     try:
         df = load_sheet_from_db("MOPR")
         df = df.loc[:, [c for c in df.columns if not str(c).lower().startswith("unnamed")]]
@@ -208,69 +218,190 @@ def render_mopr():
             st.session_state.main_view = "dashboard"
         return
 
+    # --- normalize column names (no regex to keep copy-safe) ---
     def _norm(name: str) -> str:
-        s = str(name).replace("\u00a0", " ").strip().lower()
-        s = re.sub(r"[\s\-]+", "_", s).replace("__", "_")
+        s = str(name).replace(chr(160), " ").strip().lower()
+        s = s.replace("-", " ")
+        s = " ".join(s.split())
+        s = s.replace(" ", "_")
         return s
 
-    norm_map = {_norm(c): c for c in df.columns if str(c).strip() != ""}
-    dept_col = next((norm_map[k] for k in ["department", "dept", "departments"] if k in norm_map), None)
-    url_col  = next((norm_map[k] for k in ["ppt_url", "ppturl", "ppt_link", "ppt", "url", "link"] if k in norm_map), None)
-    date_col = next((norm_map[k] for k in ["date", "updated", "updated_on", "last_updated", "last_update"] if k in norm_map), None)
+    norm_map = {_norm(c): c for c in df.columns if str(c).strip()}
+
+    dept_col = next((norm_map[k] for k in ("department", "dept", "departments") if k in norm_map), None)
+    url_col  = next((norm_map[k] for k in ("ppt_url", "ppturl", "ppt_link", "ppt", "url", "link") if k in norm_map), None)
+    date_col = next((norm_map[k] for k in ("date", "updated", "updated_on", "last_updated", "last_update") if k in norm_map), None)
+
+    month_col = next((norm_map[k] for k in ("month", "mth", "period") if k in norm_map), None)
+    fy_col    = next((norm_map[k] for k in ("financial_year", "financialyear", "fy") if k in norm_map), None)
 
     if not dept_col or not url_col:
-        st.error("MOPR sheet must have columns like: **Department** + **PPT_URL** (aliases ok: Dept / Link / URL).")
+        st.error("MOPR sheet must have columns like: Department + PPT_URL (aliases ok).")
         if st.button("⬅️ Back to Dashboard", key="mopr_back_cols"):
             st.session_state.main_view = "dashboard"
         return
 
-    keep_cols = [dept_col, url_col] + ([date_col] if date_col else [])
-    df_work = df[keep_cols].copy()
-
+    keep_cols = [dept_col, url_col]
     if date_col:
-        df_work["__date"] = pd.to_datetime(df_work[date_col], errors="coerce")
-        df_work = (df_work.dropna(subset=[dept_col])
-                         .sort_values([dept_col, "__date"], na_position="first")
-                         .groupby(dept_col, as_index=False)
-                         .tail(1))
-    else:
-        df_work = df_work.dropna(subset=[dept_col]).drop_duplicates(subset=[dept_col], keep="last")
+        keep_cols.append(date_col)
+    if (not date_col) and month_col:
+        keep_cols.append(month_col)
+    if (not date_col) and fy_col:
+        keep_cols.append(fy_col)
 
-    # ---------- robust URL extraction (only change you needed) ----------
-    url_regex = re.compile(r'(https?://[^\s"<>]+)', re.IGNORECASE)
-    hyp_regex = re.compile(r'hyperlink\(\s*"([^"]+)"', re.IGNORECASE)
+    df_work = df[keep_cols].copy()
+    df_work = df_work.dropna(subset=[dept_col])
+
+    # ---------- URL extraction (no regex) ----------
+    stop_chars = " \"<>" + chr(9) + chr(10) + chr(13)
+
     def extract_url(val) -> str:
         s = str(val or "")
-        # strip NBSP and zero-width chars that make truthiness checks fail
-        s = (s.replace("\u00a0", " ")
-               .replace("\u200b", "")
-               .replace("\u200c", "")
-               .replace("\u200d", "")
+        s = (s.replace(chr(160), " ")
+               .replace(chr(8203), "")
+               .replace(chr(8204), "")
+               .replace(chr(8205), "")
                .strip())
-        # HYPERLINK("url","text")
-        m = hyp_regex.search(s)
-        if m:
-            return m.group(1).strip()
-        # first http(s) occurrence
-        m = url_regex.search(s)
-        return m.group(1).strip() if m else ""
 
-    # Build items
+        s_low = s.lower()
+
+        # Case 1: HYPERLINK("url","text")
+        if "hyperlink(" in s_low:
+            start = s_low.find("hyperlink(")
+            q1 = s.find('"', start)
+            if q1 != -1:
+                q2 = s.find('"', q1 + 1)
+                if q2 != -1:
+                    return s[q1 + 1:q2].strip()
+
+        # Case 2: plain http(s)
+        for proto in ("https://", "http://"):
+            p = s_low.find(proto)
+            if p != -1:
+                out = []
+                for ch in s[p:]:
+                    if ch in stop_chars:
+                        break
+                    out.append(ch)
+                return "".join(out).strip()
+
+        return ""
+
+    # ---------- FY helper (Apr–Mar) ----------
+    def fiscal_year_label(dt: pd.Timestamp) -> str:
+        if pd.isna(dt):
+            return ""
+        y = int(dt.year)
+        if int(dt.month) >= 4:
+            start = y
+            end = y + 1
+        else:
+            start = y - 1
+            end = y
+        return f"FY {start}-{str(end)[-2:]}"
+
+    selected_fy = "All"
+    selected_month = "All"
+
+    # ---------- Filtering ----------
+    if date_col:
+        df_work["__date"] = pd.to_datetime(df_work[date_col], errors="coerce")
+        df_work["__month_label"] = df_work["__date"].dt.strftime("%b %Y")
+        df_work["__fy"] = df_work["__date"].apply(fiscal_year_label)
+
+        df_with_dates = df_work.dropna(subset=["__date"]).copy()
+
+        fy_vals = [v for v in df_with_dates["__fy"].dropna().unique().tolist() if str(v).strip()]
+
+        def _fy_sort_key(v: str) -> int:
+            digits = "".join([c for c in str(v) if c.isdigit()])
+            return int(digits[:4]) if len(digits) >= 4 else 0
+
+        fy_vals = sorted(fy_vals, key=_fy_sort_key, reverse=True)
+
+        c_fy, c_mo, _sp = st.columns([1.2, 1.3, 3.5])
+        with c_fy:
+            selected_fy = st.selectbox("FY", options=["All"] + fy_vals, index=0, key="mopr_fy_select")
+
+        tmp = df_with_dates
+        if selected_fy != "All":
+            tmp = tmp[tmp["__fy"] == selected_fy]
+
+        month_df = tmp[["__month_label", "__date"]].dropna(subset=["__date"]).sort_values("__date")
+
+        month_order = []
+        seen = set()
+        for _, r in month_df.iterrows():
+            lab = str(r.get("__month_label", "")).strip()
+            if lab and lab not in seen:
+                month_order.append(lab)
+                seen.add(lab)
+
+        month_order = list(reversed(month_order))
+
+        with c_mo:
+            selected_month = st.selectbox("Month", options=["All"] + month_order, index=0, key="mopr_month_select")
+
+        df_filt = df_work.copy()
+        if selected_fy != "All":
+            df_filt = df_filt[df_filt["__fy"] == selected_fy]
+        if selected_month != "All":
+            df_filt = df_filt[df_filt["__month_label"] == selected_month]
+
+        df_filt = (
+            df_filt.sort_values([dept_col, "__date"], na_position="first")
+                   .groupby(dept_col, as_index=False)
+                   .tail(1)
+        )
+
+    else:
+        df_filt = df_work.copy()
+
+        if month_col:
+            df_filt["__month_label"] = df_filt[month_col].astype(str).str.strip()
+        if fy_col:
+            df_filt["__fy"] = df_filt[fy_col].astype(str).str.strip()
+
+        fy_vals = []
+        month_vals = []
+        if fy_col:
+            fy_vals = sorted([v for v in df_filt["__fy"].unique().tolist() if str(v).strip()], reverse=True)
+        if month_col:
+            month_vals = sorted([v for v in df_filt["__month_label"].unique().tolist() if str(v).strip()], reverse=True)
+
+        if fy_vals or month_vals:
+            c_fy, c_mo, _sp = st.columns([1.2, 1.3, 3.5])
+            with c_fy:
+                if fy_vals:
+                    selected_fy = st.selectbox("FY", options=["All"] + fy_vals, index=0, key="mopr_fy_select")
+            with c_mo:
+                if month_vals:
+                    selected_month = st.selectbox("Month", options=["All"] + month_vals, index=0, key="mopr_month_select")
+
+            if fy_col and selected_fy != "All":
+                df_filt = df_filt[df_filt["__fy"] == selected_fy]
+            if month_col and selected_month != "All":
+                df_filt = df_filt[df_filt["__month_label"] == selected_month]
+
+        df_filt = df_filt.drop_duplicates(subset=[dept_col], keep="last")
+
+    # ---------- Build items ----------
     rows = []
-    for _, r in df_work.iterrows():
+    for _, r in df_filt.iterrows():
         d = str(r.get(dept_col, "")).strip()
         u = extract_url(r.get(url_col, ""))
         if d:
             rows.append((d, u))
+
     rows.sort(key=lambda x: x[0].lower())
 
     if not rows:
-        st.info("No departments found in MOPR sheet. Add at least 'Department' values.")
+        st.info("No departments found for the selected Month/FY. Try another selection or check MOPR data.")
         if st.button("⬅️ Back to Dashboard", key="mopr_back_nodata"):
             st.session_state.main_view = "dashboard"
         return
 
-    # --- layout ---
+    # --- layout (unchanged) ---
     n = len(rows)
     if n <= 12:
         size = 860;  btn_w, btn_h = 140, 44; radii_f = [0.38]
@@ -280,9 +411,10 @@ def render_mopr():
         size = 980;  btn_w, btn_h = 120, 40; radii_f = [0.26, 0.43, 0.60]
     else:
         size = 1080; btn_w, btn_h = 118, 38; radii_f = [0.22, 0.36, 0.52, 0.68]
+
     center = size // 2
-    radii  = [int(size * r) for r in radii_f]
-    rings  = len(radii)
+    radii = [int(size * r) for r in radii_f]
+    rings = len(radii)
 
     weights = [r for r in radii]
     total_w = sum(weights)
@@ -293,20 +425,26 @@ def render_mopr():
         k = 0
         while diff != 0:
             i = order[k % rings]
-            if diff > 0: base[i] += 1; diff -= 1
+            if diff > 0:
+                base[i] += 1; diff -= 1
             else:
-                if base[i] > 0: base[i] -= 1; diff += 1
+                if base[i] > 0:
+                    base[i] -= 1; diff += 1
             k += 1
     ring_counts = base
 
     nodes_html, lines = [], []
     idx = 0
+
     for r_idx, count in enumerate(ring_counts):
-        if count <= 0: continue
+        if count <= 0:
+            continue
         radius = radii[r_idx]
         angle_offset = (math.pi / max(count, 1)) * (r_idx % 2)
+
         for j in range(count):
-            if idx >= n: break
+            if idx >= n:
+                break
             dept, url = rows[idx]; idx += 1
 
             angle = angle_offset + 2 * math.pi * j / max(count, 1)
@@ -318,9 +456,16 @@ def render_mopr():
             cy = y + btn_h / 2
 
             if url:
-                lines.append(f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" stroke="url(#grad)" stroke-width="2.5" stroke-linecap="round" opacity="0.9" />')
+                lines.append(
+                    f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" '
+                    f'stroke="url(#grad)" stroke-width="2.5" stroke-linecap="round" opacity="0.9" />'
+                )
             else:
-                lines.append(f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" stroke="#b9d7ff" stroke-width="2" stroke-linecap="round" stroke-dasharray="6 6" opacity="0.45" />')
+                lines.append(
+                    f'<line x1="{center}" y1="{center}" x2="{int(cx)}" y2="{int(cy)}" '
+                    f'stroke="#b9d7ff" stroke-width="2" stroke-linecap="round" '
+                    f'stroke-dasharray="6 6" opacity="0.45" />'
+                )
 
             label_html = html.escape(dept)
             common_css = (
@@ -335,28 +480,28 @@ def render_mopr():
                 safe_url = url.replace('"', '%22')
                 nodes_html.append(
                     f'<a href="{safe_url}" target="_blank" rel="noopener" title="{label_html}" '
-                    f'style="{common_css} background:linear-gradient(90deg,#299bff 10%, #55e386 90%); color:#000; text-decoration:none;">{label_html}</a>'
+                    f'style="{common_css} background:linear-gradient(90deg,#299bff 10%, #55e386 90%); '
+                    f'color:#000; text-decoration:none;">{label_html}</a>'
                 )
             else:
                 nodes_html.append(
                     f'<div aria-disabled="true" title="{label_html}" '
-                    f'style="{common_css} background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%); color:#2056b5; opacity:0.65; cursor:not-allowed; user-select:none;">{label_html}</div>'
+                    f'style="{common_css} background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%); '
+                    f'color:#2056b5; opacity:0.65; cursor:not-allowed; user-select:none;">{label_html}</div>'
                 )
 
     edges_svg = (
-          f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" '
-          f'style="position:absolute; left:0; top:0; z-index:0; pointer-events:none;">'
-          f'<defs>'
-          f'  <linearGradient id="grad" gradientUnits="userSpaceOnUse" '
-          f'                  x1="0" y1="0" x2="{size}" y2="0">'
-          f'    <stop offset="10%" stop-color="#299bff"/>'
-          f'    <stop offset="90%" stop-color="#55e386"/>'
-          f'  </linearGradient>'
-          f'</defs>'
-          f'{"".join(lines)}'
-          f'</svg>'
+        f'<svg width="{size}" height="{size}" viewBox="0 0 {size} {size}" '
+        f'style="position:absolute; left:0; top:0; z-index:0; pointer-events:none;">'
+        f'<defs>'
+        f'  <linearGradient id="grad" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="{size}" y2="0">'
+        f'    <stop offset="10%" stop-color="#299bff"/>'
+        f'    <stop offset="90%" stop-color="#55e386"/>'
+        f'  </linearGradient>'
+        f'</defs>'
+        f'{"".join(lines)}'
+        f'</svg>'
     )
-
 
     nodes_layer = "".join(nodes_html)
 
@@ -374,16 +519,17 @@ def render_mopr():
 
     legend_html = """
      <div style='display:flex;gap:18px;justify-content:center;align-items:center;margin:6px 0 14px 0;flex-wrap:wrap;'>
-       <span style="display:inline-flex;align-items:center;gap:8px;">
-         <span style="display:inline-block;width:18px;height:12px;border-radius:6px;background:linear-gradient(90deg,#299bff 10%, #55e386 90%);box-shadow:0 1px 6px #8fd3fe60;"></span>
-         <span style="color:#2056b5;font-weight:700;">Clickable (PPT available)</span>
-       </span>
-       <span style="display:inline-flex;align-items:center;gap:8px;">
-         <span style="display:inline-block;width:18px;height:12px;border-radius:6px;background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%);box-shadow:0 1px 6px #8fd3fe60;opacity:0.85;"></span>
-         <span style="color:#2056b5;font-weight:700;">No PPT yet</span>
-       </span>
+      <span style="display:inline-flex;align-items:center;gap:8px;">
+        <span style="display:inline-block;width:18px;height:12px;border-radius:6px;background:linear-gradient(90deg,#299bff 10%, #55e386 90%);box-shadow:0 1px 6px #8fd3fe60;"></span>
+        <span style="color:#2056b5;font-weight:700;">Clickable (PPT available)</span>
+      </span>
+      <span style="display:inline-flex;align-items:center;gap:8px;">
+        <span style="display:inline-block;width:18px;height:12px;border-radius:6px;background:linear-gradient(90deg,#e3f4ff 10%, #e9ffe4 90%);box-shadow:0 1px 6px #8fd3fe60;opacity:0.85;"></span>
+        <span style="color:#2056b5;font-weight:700;">No PPT yet</span>
+      </span>
      </div>
     """
+
     st.markdown(legend_html, unsafe_allow_html=True)
 
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
