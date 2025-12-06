@@ -202,6 +202,33 @@ def render_mopr():
     st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
     st.markdown("### MOPR — Star Topology")
 
+    # --- dropdown label + value color (black) ---
+    st.markdown(
+        """
+        <style>
+        /* Widget labels */
+        div[data-testid="stWidgetLabel"] > label {
+            color: #000000 !important;
+            font-weight: 700 !important;
+        }
+
+        /* Selectbox selected text */
+        div[data-testid="stSelectbox"] div[role="combobox"] {
+            color: #000000 !important;
+        }
+        div[data-testid="stSelectbox"] div[role="combobox"] * {
+            color: #000000 !important;
+        }
+
+        /* Dropdown menu items */
+        div[role="listbox"] * {
+            color: #000000 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     # --- load ---
     try:
         df = load_sheet_from_db("MOPR")
@@ -321,7 +348,7 @@ def render_mopr():
 
         c_fy, c_mo, _sp = st.columns([1.2, 1.3, 3.5])
         with c_fy:
-            selected_fy = st.selectbox("FY", options=["All"] + fy_vals, index=0, key="mopr_fy_select")
+            selected_fy = st.selectbox("Financial Year", options=["All"] + fy_vals, index=0, key="mopr_fy_select")
 
         tmp = df_with_dates
         if selected_fy != "All":
@@ -340,7 +367,7 @@ def render_mopr():
         month_order = list(reversed(month_order))
 
         with c_mo:
-            selected_month = st.selectbox("Month", options=["All"] + month_order, index=0, key="mopr_month_select")
+            selected_month = st.selectbox("MOPR Month", options=["All"] + month_order, index=0, key="mopr_month_select")
 
         df_filt = df_work.copy()
         if selected_fy != "All":
@@ -373,10 +400,10 @@ def render_mopr():
             c_fy, c_mo, _sp = st.columns([1.2, 1.3, 3.5])
             with c_fy:
                 if fy_vals:
-                    selected_fy = st.selectbox("FY", options=["All"] + fy_vals, index=0, key="mopr_fy_select")
+                    selected_fy = st.selectbox("Financial Year", options=["All"] + fy_vals, index=0, key="mopr_fy_select")
             with c_mo:
                 if month_vals:
-                    selected_month = st.selectbox("Month", options=["All"] + month_vals, index=0, key="mopr_month_select")
+                    selected_month = st.selectbox("MOPR Month", options=["All"] + month_vals, index=0, key="mopr_month_select")
 
             if fy_col and selected_fy != "All":
                 df_filt = df_filt[df_filt["__fy"] == selected_fy]
