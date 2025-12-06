@@ -202,25 +202,39 @@ def render_mopr():
     st.markdown("<div style='height:8px;'></div>", unsafe_allow_html=True)
     st.markdown("### MOPR — Star Topology")
 
-    # --- dropdown label + value color (black) ---
+    # --- dropdown label + selected value color (black) ---
+    # Force label text + selected values to black.
+    # (More aggressive selectors to override app theme styles.)
     st.markdown(
         """
         <style>
-        /* Widget labels */
+        /* 1) Global label force (covers most Streamlit versions) */
+        label {
+            color: #000000 !important;
+            font-weight: 700 !important;
+        }
+
+        /* 2) Specific widget label wrapper (newer Streamlit) */
         div[data-testid="stWidgetLabel"] > label {
             color: #000000 !important;
             font-weight: 700 !important;
         }
 
-        /* Selectbox selected text */
-        div[data-testid="stSelectbox"] div[role="combobox"] {
+        /* 3) Selectbox label inside columns/containers */
+        div[data-testid="stSelectbox"] label {
             color: #000000 !important;
-        }
-        div[data-testid="stSelectbox"] div[role="combobox"] * {
-            color: #000000 !important;
+            font-weight: 700 !important;
         }
 
-        /* Dropdown menu items */
+        /* 4) BaseWeb Select (Streamlit selectbox) - selected value + arrow */
+        div[data-baseweb="select"] * {
+            color: #000000 !important;
+        }
+        div[data-baseweb="select"] svg {
+            fill: #000000 !important;
+        }
+
+        /* 5) Dropdown menu items */
         div[role="listbox"] * {
             color: #000000 !important;
         }
@@ -562,7 +576,6 @@ def render_mopr():
     st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
     if st.button("⬅️ Back to Dashboard", key="mopr_back_btn"):
         st.session_state.main_view = "dashboard"
-
 
 
 # ---------- SHEETS & NAVIGATION STATE ----------
