@@ -24,7 +24,9 @@ def _sanitize_excel_str(v):
     return s
 
 def sanitize_df_for_excel(df: pd.DataFrame) -> pd.DataFrame:
-    return df.applymap(_sanitize_excel_str)
+    if hasattr(df, "map"):          # pandas >= 2.1
+        return df.map(_sanitize_excel_str)
+    return df.applymap(_sanitize_excel_str)   # purane pandas ke liye
 
 
 
